@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+package-lock.json
+client/node_modules/
+client/package-lock.json
+
+# Next.js build output
+.next/
+client/.next/
+
+# Python / Server cache & environments
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+server/__pycache__/
+server/app/__pycache__/
+server/app/routers/__pycache__/
+server/app/services/__pycache__/
+
+# Local data & environment secrets
+.env
+.env.local
+.env*.local
+*.log
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

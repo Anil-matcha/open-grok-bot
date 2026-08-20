@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  --sidebar-bg: #141416;
+  --card-active: #27272a;
+  --popover-bg: #1c1c20;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Dark Desktop Glass & Card Styles */
+.dark-sidebar {
+  background-color: #141416;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dark-popover {
+  background-color: #1c1c20;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.6);
+}
+
+.dark-pill-input {
+  background-color: #1c1c20;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.dark-bubble-bot {
+  background-color: #1e1e22;
+  color: #f4f4f5;
+  border-radius: 18px;
+}
+
+.dark-bubble-error {
+  background-color: #241416;
+  border: 1px solid #3f191b;
+  color: #f87171;
+  border-radius: 18px;
+}
+
+.dark-bubble-user {
+  background-color: #38383e;
+  color: #ffffff;
+  border-radius: 18px;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.15s ease-out forwards;
+}
+
