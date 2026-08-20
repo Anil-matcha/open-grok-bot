@@ -9,11 +9,14 @@ from typing import List, Optional
 from app.schemas.contracts import TurnRequest, Message
 from app.services.storage_service import storage_service
 from app.services.muapi_service import muapi_service
-from app.services.approval_broker import approval_broker
+from app.services.action_gateway import (
+    ActionGatewayError,
+    ActionPolicyError,
+    action_gateway,
+)
 from app.services.workspace_service import (
     WorkspaceToolError,
     parse_workspace_command,
-    workspace_service,
 )
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
@@ -91,85 +94,113 @@ async def stream_turn(thread_id: str, model: Optional[str] = Query("grok-4-5")):
             }
 
         if workspace_call:
-            approval = approval_broker.open(thread_id, thread_id, workspace_call)
-            yield {
-                "event": "message",
-                "data": json.dumps({
-                    "type": "request.opened",
-                    "requestType": "permission",
-                    "requestId": approval["request_id"],
-                    "tool": approval["tool"],
-                    "summary": approval["summary"],
-                    "arguments": approval["arguments"],
-                }),
-            }
-
-            decision = await approval_broker.wait(approval["request_id"])
-            if decision == "allow":
+            try:
+                action_request, approval = action_gateway.open(
+                    thread_id,
+                    thread_id,
+                    workspace_call,
+                )
+            except ActionPolicyError as exc:
+                tool_context = f"Workspace action rejected by policy: {exc}"
                 yield {
                     "event": "message",
                     "data": json.dumps({
-                        "type": "tool.started",
+                        "type": "tool.failed",
                         "tool": workspace_call.name,
-                        "requestId": approval["request_id"],
-                    }),
-                }
-                try:
-                    result = workspace_service.execute(workspace_call)
-                    tool_context = f"Workspace tool result ({workspace_call.name}): {json.dumps(result)}"
-                    yield {
-                        "event": "message",
-                        "data": json.dumps({
-                            "type": "tool.completed",
-                            "tool": workspace_call.name,
-                            "requestId": approval["request_id"],
-                            "result": result,
-                        }),
-                    }
-                    storage_service.add_audit_event({
-                        "event": "tool.completed",
-                        "request_id": approval["request_id"],
-                        "tool": workspace_call.name,
-                        "created_at": datetime.now().isoformat(),
-                    })
-                except WorkspaceToolError as exc:
-                    tool_context = f"Workspace tool failed ({workspace_call.name}): {exc}"
-                    yield {
-                        "event": "message",
-                        "data": json.dumps({
-                            "type": "tool.failed",
-                            "tool": workspace_call.name,
-                            "requestId": approval["request_id"],
-                            "error": str(exc),
-                        }),
-                    }
-                    storage_service.add_audit_event({
-                        "event": "tool.failed",
-                        "request_id": approval["request_id"],
-                        "tool": workspace_call.name,
+                        "requestId": exc.request_id,
                         "error": str(exc),
-                        "created_at": datetime.now().isoformat(),
-                    })
-            elif decision == "deny":
-                tool_context = f"Workspace tool denied by the user: {workspace_call.name}"
-                yield {
-                    "event": "message",
-                    "data": json.dumps({
-                        "type": "tool.denied",
-                        "tool": workspace_call.name,
-                        "requestId": approval["request_id"],
                     }),
                 }
             else:
-                tool_context = f"Workspace tool expired before approval: {workspace_call.name}"
+                approval_payload = approval or {
+                    "request_id": action_request.request_id,
+                    "tool": f"{action_request.tool}.{action_request.action}",
+                    "summary": action_request.preview,
+                    "arguments": action_request.arguments,
+                }
                 yield {
                     "event": "message",
                     "data": json.dumps({
-                        "type": "tool.expired",
-                        "tool": workspace_call.name,
-                        "requestId": approval["request_id"],
+                        "type": "request.opened",
+                        "requestType": "permission",
+                        "requestId": action_request.request_id,
+                        "tool": approval_payload["tool"],
+                        "summary": approval_payload["summary"],
+                        "arguments": approval_payload["arguments"],
+                        "action": action_request.model_dump(),
                     }),
                 }
+
+                decision = await action_gateway.wait_for_decision(action_request)
+                action_name = f"{action_request.tool}.{action_request.action}"
+                if decision == "allow":
+                    yield {
+                        "event": "message",
+                        "data": json.dumps({
+                            "type": "tool.started",
+                            "tool": action_name,
+                            "requestId": action_request.request_id,
+                            "action": action_request.model_dump(),
+                        }),
+                    }
+                    try:
+                        action_result = action_gateway.execute(action_request)
+                    except ActionGatewayError as exc:
+                        tool_context = f"Workspace action could not execute ({action_name}): {exc}"
+                        yield {
+                            "event": "message",
+                            "data": json.dumps({
+                                "type": "tool.failed",
+                                "tool": action_name,
+                                "requestId": action_request.request_id,
+                                "error": str(exc),
+                            }),
+                        }
+                    else:
+                        if action_result.status == "completed":
+                            result = action_result.result or {}
+                            tool_context = f"Workspace tool result ({action_name}): {json.dumps(result)}"
+                            yield {
+                                "event": "message",
+                                "data": json.dumps({
+                                    "type": "tool.completed",
+                                    "tool": action_name,
+                                    "requestId": action_request.request_id,
+                                    "result": result,
+                                }),
+                            }
+                        else:
+                            error = action_result.error or "The action failed."
+                            tool_context = f"Workspace action failed ({action_name}): {error}"
+                            yield {
+                                "event": "message",
+                                "data": json.dumps({
+                                    "type": "tool.failed",
+                                    "tool": action_name,
+                                    "requestId": action_request.request_id,
+                                    "error": error,
+                                }),
+                            }
+                elif decision == "deny":
+                    tool_context = f"Workspace tool denied by the user: {action_name}"
+                    yield {
+                        "event": "message",
+                        "data": json.dumps({
+                            "type": "tool.denied",
+                            "tool": action_name,
+                            "requestId": action_request.request_id,
+                        }),
+                    }
+                else:
+                    tool_context = f"Workspace tool expired before approval: {action_name}"
+                    yield {
+                        "event": "message",
+                        "data": json.dumps({
+                            "type": "tool.expired",
+                            "tool": action_name,
+                            "requestId": action_request.request_id,
+                        }),
+                    }
 
         if tool_context:
             system_prompt = f"{system_prompt}\n\n{tool_context}"

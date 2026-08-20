@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import uuid
 
 from app.config import settings
@@ -25,8 +25,14 @@ class ApprovalBroker:
     def __init__(self):
         self.pending: Dict[str, PendingApproval] = {}
 
-    def open(self, thread_id: str, bot_id: str, call: WorkspaceToolCall) -> Dict[str, Any]:
-        request_id = f"req-{uuid.uuid4().hex[:10]}"
+    def open(
+        self,
+        thread_id: str,
+        bot_id: str,
+        call: WorkspaceToolCall,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        request_id = request_id or f"req-{uuid.uuid4().hex[:10]}"
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         self.pending[request_id] = PendingApproval(request_id, future)

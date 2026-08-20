@@ -52,7 +52,7 @@ class WorkspaceServiceTests(unittest.TestCase):
 class ApiRouteTests(unittest.TestCase):
     @unittest.skipIf(app is None, "FastAPI dependencies are not installed")
     def test_audit_route_is_registered(self):
-        self.assertTrue(any(route.path == "/api/v1/audit" for route in app.routes))
+        self.assertIn("/api/v1/audit", app.openapi()["paths"])
 
 
 class ApprovalBrokerTests(unittest.IsolatedAsyncioTestCase):

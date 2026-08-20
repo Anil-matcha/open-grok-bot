@@ -17,6 +17,7 @@ This is an independent open-source project and is not affiliated with xAI.
 - **Markdown messages:** Render assistant replies as Markdown in the chat transcript.
 - **Voice dictation:** Use the browser's Web Speech API when the browser supports it.
 - **Approved workspace tools:** Explicit `/workspace list`, `/workspace read`, and `/workspace write` requests pause for user approval, stay inside `WORKSPACE_ROOT`, and produce audit events.
+- **Governed action gateway:** Workspace actions use a structured request/result contract, a deny-by-default registry, approval state, and redacted lifecycle audit records.
 - **Settings drawer:** Configure the MUAPI key, provider base URL, default model, Composio key, and local profile details.
 - **Connector surface:** Browse a curated or live Composio app catalog, inspect connection status, and start OAuth authorization explicitly from Marketplace.
 - **Audit trail:** Review local approval, workspace-tool, and connector events from the sidebar.
@@ -131,6 +132,7 @@ The main code areas are:
 | `server/app/services/storage_service.py` | Local JSON persistence and default data |
 | `server/app/services/workspace_service.py` | Confined list/read/write workspace tools |
 | `server/app/services/approval_broker.py` | Pending approval coordination and audit events |
+| `server/app/services/action_gateway.py` | Registered action policy, approval handoff, execution, and lifecycle audit |
 | `server/app/schemas/contracts.py` | Pydantic request and response models |
 | `server/tests/` | Focused workspace and approval regression tests |
 
@@ -139,10 +141,11 @@ The main code areas are:
 1. The client posts the user message to `/api/v1/chat/send`.
 2. The server stores it in the local message store.
 3. The client opens an EventSource connection to `/api/v1/chat/stream/{thread_id}`.
-4. An explicit workspace request pauses the stream until the user allows or denies it.
-5. Approved workspace actions execute inside `WORKSPACE_ROOT` and emit tool/audit events.
-6. The server sends the selected model, recent history, and tool result to MUAPI.
-7. Provider output is forwarded as SSE deltas and the completed assistant message is persisted.
+4. An explicit workspace request becomes a structured action request and is checked against the deny-by-default gateway registry.
+5. The gateway pauses the stream until the user allows or denies the action, then executes approved work inside `WORKSPACE_ROOT`.
+6. The gateway emits normalized action lifecycle records; the client receives compatible tool events and the approved result.
+7. The server sends the selected model, recent history, and tool result to MUAPI.
+8. Provider output is forwarded as SSE deltas and the completed assistant message is persisted.
 
 ### Product direction
 
