@@ -23,7 +23,7 @@ This is an independent open-source project and is not affiliated with xAI.
 - **Read-only GitHub action:** After connecting GitHub, run an explicit issue lookup from chat and pass its structured result through the action gateway.
 - **Approval-gated GitHub write:** Propose a GitHub issue from chat, inspect the repository/title/body-size preview, approve it, and receive a normalized issue result.
 - **Audit trail:** Review local approval, workspace-tool, and connector events from the sidebar.
-- **Computer workspace surface:** Preview the intended computer/terminal experience while the runtime integration is still being built.
+- **Computer provider surface:** Inspect a bot-scoped provider lifecycle, poll screen metadata, and run higher-risk provider actions through the same gateway used by tools.
 
 ## Quick start
 
@@ -112,7 +112,7 @@ The selected model ID is appended to `MUAPI_BASE_URL`. The configured provider m
 | Surface | Purpose |
 | --- | --- |
 | Chat | Bot roster, model selection, Markdown replies, image attachments, voice dictation, and streamed responses |
-| Computer | Visual preview of a future browser/terminal workspace |
+| Computer | Bot-scoped provider lifecycle, screen metadata polling, and governed computer actions |
 | Marketplace | Searchable curated or live app catalog with explicit connect/disconnect actions |
 | Audit trail | Recent approval, workspace-tool, and connector events persisted by the local API |
 | App Settings | Local profile values and MUAPI connection/model settings |
@@ -126,6 +126,10 @@ Next.js client  ── HTTP + SSE ──▶  FastAPI server
                  ▼                   ▼                   ▼
            SQLite + key store     MUAPI API       Optional Composio
            state/settings/audit   model + upload  connector endpoints
+                                     │
+                                     ▼
+                              Computer provider
+                              + action gateway
 ```
 
 The main code areas are:
@@ -136,7 +140,7 @@ The main code areas are:
 | `client/components/` | Dashboard, chat, model picker, settings, marketplace, audit, and preview surfaces |
 | `client/lib/api.js` | HTTP and EventSource client functions |
 | `server/app/main.py` | FastAPI app, CORS, router registration, and health route |
-| `server/app/routers/` | Bots, chat, models, uploads, settings, approvals, and connectors |
+| `server/app/routers/` | Bots, chat, models, uploads, settings, approvals, connectors, and computers |
 | `server/app/services/muapi_service.py` | Provider requests, prediction polling, output parsing, and response events |
 | `server/app/services/storage_service.py` | SQLite persistence, legacy import, secrets, and default data |
 | `server/app/services/database.py` | SQLite connection management and schema migrations |
@@ -146,8 +150,11 @@ The main code areas are:
 | `server/app/services/action_gateway.py` | Registered action policy, approval handoff, execution, and lifecycle audit |
 | `server/app/services/composio_service.py` | Server-side Composio MCP calls and normalized GitHub issue results |
 | `server/app/services/connector_actions.py` | Explicit connector command parsing and gateway registration |
+| `server/app/services/computer_provider.py` | Provider contract and deterministic local computer adapter |
+| `server/app/services/computer_actions.py` | Computer action definitions and gateway executors |
+| `server/app/routers/computers.py` | Authenticated computer lifecycle, screen, and approval continuation routes |
 | `server/app/schemas/contracts.py` | Pydantic request and response models |
-| `server/tests/` | Focused workspace and approval regression tests |
+| `server/tests/` | Focused workspace, approval, persistence, auth, and provider regression tests |
 
 ### Chat request flow
 
@@ -187,6 +194,8 @@ optional body on the next line
 
 The read action requires a configured Composio key and an active GitHub connection. The write action also requires an approval response. Results are limited to issue summaries; credentials and issue bodies are not copied into the action request preview or audit summary.
 
+Computer actions are also explicit. Lifecycle controls use the authenticated `/computers/{bot_id}/...` routes and are recorded by the action gateway. Provider operations such as `terminal_execute`, `browser_navigate`, `files_list`, and `send_input` can be opened through `/computers/{bot_id}/actions`; higher-risk operations return a pending request until `/approvals/respond` allows them, then the matching `/actions/{request_id}/execute` route continues the action.
+
 ## API
 
 All routes are prefixed with `/api/v1`.
@@ -212,6 +221,16 @@ All routes are prefixed with `/api/v1`.
 | GET | `/connectors?services=...` | Check connector connection status |
 | POST | `/connectors/{slug}/authorize` | Request an OAuth URL |
 | DELETE | `/connectors/{slug}` | Disconnect a connector |
+| GET | `/computers/{bot_id}` | Read provider status without creating a runtime |
+| POST | `/computers/{bot_id}/create` | Create the bot-scoped provider runtime |
+| POST | `/computers/{bot_id}/start` | Start the provider runtime |
+| POST | `/computers/{bot_id}/pause` | Pause the provider runtime |
+| POST | `/computers/{bot_id}/stop` | Stop the provider runtime |
+| POST | `/computers/{bot_id}/reset` | Reset provider state and generation |
+| GET | `/computers/{bot_id}/health` | Read provider health through the gateway |
+| GET | `/computers/{bot_id}/screenshot` | Read the current screen-state metadata |
+| POST | `/computers/{bot_id}/actions` | Open a provider operation, returning 202 when approval is required |
+| POST | `/computers/{bot_id}/actions/{request_id}/execute` | Continue an approved provider operation |
 
 Try the health route after starting the server:
 
@@ -240,13 +259,13 @@ The following surfaces are present but should not be mistaken for completed infr
 
 - **Single local owner:** Authentication, bearer validation, and owner-scoped rows are present, but user provisioning, roles beyond the local owner, and multi-user grants are still pending.
 - **Single-user local storage:** SQLite improves restart durability, but multi-user provisioning, backups, and multi-instance coordination are still pending.
-- **No real computer runtime:** The Computer tab is a visual preview; this repository does not provision a browser desktop or provide a working VNC session.
+- **No isolated computer runtime yet:** The provider contract, lifecycle, gateway routes, and deterministic fake adapter are present, but the repository does not provision a browser desktop, execute terminal processes, stream real pixels, or provide a working VNC session.
 - **No durable memory or routines:** Conversations persist, but there is no separate memory store, scheduled routine engine, or background worker yet.
 - **No voice or multi-client apps:** Voice, desktop, and mobile clients are not included in this repository.
-- **Workspace tools are intentionally narrow:** The first tool loop supports confined file listing, reads, and writes only. Arbitrary shell commands, browser control, and background agents are not implemented.
+- **Workspace and computer tools are intentionally narrow:** Workspace commands support confined file listing, reads, and writes. Computer operations have a provider contract and approval path, but the current adapter records safe metadata instead of launching processes or controlling a browser.
 - **Connector actions are intentionally narrow:** Chat currently exposes only GitHub issue listing and approval-gated issue creation. Dynamic tool discovery, arbitrary connector calls, and other connector writes remain roadmap work.
 - **Provider streaming is adapter-level:** Depending on the provider response, the service may receive a completed result and emit it to the UI in small deltas.
-- **No CI workflow is included yet:** Focused workspace and approval tests are present, but broader API, provider, and browser tests remain to be added.
+- **No CI workflow is included yet:** Focused workspace, approval, auth, persistence, and provider tests are present, but broader runtime integration and browser tests remain to be added.
 
 ## Development
 

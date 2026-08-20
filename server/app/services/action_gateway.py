@@ -319,6 +319,12 @@ class ActionGateway:
             self._decisions.pop(request.request_id, None)
         return decision
 
+    def get_pending_request(self, request_id: str) -> Optional[ActionRequest]:
+        """Return a pending request for an authenticated continuation endpoint."""
+
+        pending = self._pending.get(request_id)
+        return pending[0] if pending else None
+
     def _execute_workspace(self, call: Any) -> Dict[str, Any]:
         if not isinstance(call, WorkspaceToolCall):
             raise ActionGatewayError("Workspace actions require a workspace tool call.")

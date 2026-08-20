@@ -253,3 +253,75 @@ export async function saveSettings(settingsData) {
   if (!res.ok) throw new Error('Failed to save settings');
   return res.json();
 }
+
+export async function fetchComputerStatus(botId) {
+  const res = await apiFetch(`${API_BASE_URL}/computers/${encodeURIComponent(botId)}`);
+  if (!res.ok) throw new Error('Failed to load computer status');
+  return res.json();
+}
+
+export async function fetchComputerHealth(botId) {
+  const res = await apiFetch(`${API_BASE_URL}/computers/${encodeURIComponent(botId)}/health`);
+  if (!res.ok) throw new Error('Failed to load computer health');
+  return res.json();
+}
+
+export async function fetchComputerScreenshot(botId) {
+  const res = await apiFetch(`${API_BASE_URL}/computers/${encodeURIComponent(botId)}/screenshot`);
+  if (!res.ok) throw new Error('Failed to load computer screen state');
+  return res.json();
+}
+
+async function runComputerLifecycleAction(botId, action) {
+  const res = await apiFetch(`${API_BASE_URL}/computers/${encodeURIComponent(botId)}/${action}`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || `Computer ${action} failed`);
+  }
+  return res.json();
+}
+
+export function createComputer(botId) {
+  return runComputerLifecycleAction(botId, 'create');
+}
+
+export function startComputer(botId) {
+  return runComputerLifecycleAction(botId, 'start');
+}
+
+export function pauseComputer(botId) {
+  return runComputerLifecycleAction(botId, 'pause');
+}
+
+export function stopComputer(botId) {
+  return runComputerLifecycleAction(botId, 'stop');
+}
+
+export function resetComputer(botId) {
+  return runComputerLifecycleAction(botId, 'reset');
+}
+
+export async function runComputerAction(botId, action, argumentsData = {}) {
+  const res = await apiFetch(`${API_BASE_URL}/computers/${encodeURIComponent(botId)}/actions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, arguments: argumentsData }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok && res.status !== 202) {
+    throw new Error(payload.detail || 'Computer action failed');
+  }
+  return payload;
+}
+
+export async function executeComputerAction(botId, requestId) {
+  const res = await apiFetch(
+    `${API_BASE_URL}/computers/${encodeURIComponent(botId)}/actions/${encodeURIComponent(requestId)}/execute`,
+    { method: 'POST' },
+  );
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload.detail || 'Computer action execution failed');
+  return payload;
+}
