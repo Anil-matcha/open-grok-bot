@@ -24,6 +24,7 @@ server/app/services/__pycache__/
 .env.local
 .env*.local
 *.log
+.open-grok-bot/
 
 # OS & Editor files
 .DS_Store
