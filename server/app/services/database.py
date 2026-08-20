@@ -63,7 +63,29 @@ SCHEMA_MIGRATIONS = {
             value TEXT NOT NULL
         );
     """,
+    2: """
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            role TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO users(id, username, role, created_at)
+        VALUES ('local-user', 'local', 'owner', datetime('now'));
+    """,
 }
+
+OWNER_TABLES = (
+    "bots",
+    "messages",
+    "settings",
+    "approvals",
+    "audit_events",
+    "threads",
+    "tasks",
+    "connections",
+    "memories",
+)
 
 
 def _now() -> str:
@@ -113,10 +135,26 @@ class Database:
                 if version in applied:
                     continue
                 connection.executescript(sql)
+                if version == 2:
+                    self._add_owner_columns(connection)
                 connection.execute(
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                     (version, _now()),
                 )
+
+    @staticmethod
+    def _add_owner_columns(connection: sqlite3.Connection) -> None:
+        for table in OWNER_TABLES:
+            columns = {
+                row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
+            if "owner_id" not in columns:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local-user'"
+                )
+            connection.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_owner ON {table}(owner_id)"
+            )
 
     def get_meta(self, key: str) -> Optional[str]:
         with self.connect() as connection:

@@ -75,6 +75,8 @@ Open [http://localhost:3000](http://localhost:3000).
 
 You can also enter the provider key from **App Settings → Connections** after the UI loads. The environment variable is the server-side fallback.
 
+The local server creates a mode-0600 session token in `DATA_DIR` and the browser establishes an HttpOnly session automatically when connecting from loopback. For a deployment accessed beyond the local machine, set `APP_AUTH_TOKEN` on the server and expose the same value to the client as `NEXT_PUBLIC_API_TOKEN` through the deployment environment.
+
 ## Configuration
 
 The client defaults to `http://127.0.0.1:8000/api/v1`. Set `NEXT_PUBLIC_API_URL` if the API runs elsewhere:
@@ -93,6 +95,10 @@ The server reads these variables from the environment:
 | `DEFAULT_MODEL` | `grok-4-5` | Initial model used for new settings and bots |
 | `DATA_DIR` | per-user hidden app directory | SQLite database, migration copies, and local key location |
 | `APP_ENCRYPTION_KEY` | generated mode-0600 key in `DATA_DIR` | Optional Fernet key for encrypted provider credentials |
+| `APP_AUTH_TOKEN` | generated mode-0600 token in `DATA_DIR` | Bearer token for non-loopback API access |
+| `AUTH_SESSION_MAX_AGE` | `86400` | Session-cookie lifetime in seconds |
+| `AUTH_COOKIE_SECURE` | `0` | Set to `1` when serving over HTTPS |
+| `CORS_ORIGINS` | localhost and loopback client origins | Comma-separated browser origins allowed by the API |
 | `WORKSPACE_ROOT` | repository root | Maximum directory that approved workspace tools can access |
 | `WORKSPACE_MAX_FILE_BYTES` | `131072` | Read/write size limit for workspace files |
 | `APPROVAL_TIMEOUT_SECONDS` | `120` | How long a pending approval remains open |
@@ -188,6 +194,10 @@ All routes are prefixed with `/api/v1`.
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | GET | `/health` | Check server status and default model |
+| GET | `/auth/status` | Report authentication state without exposing credentials |
+| GET | `/auth/session` | Establish a local or bearer-backed browser session |
+| POST | `/auth/login` | Exchange a configured bearer token for an HttpOnly session |
+| POST | `/auth/logout` | Clear the current browser session |
 | GET, POST | `/bots` | List or create bot personas |
 | PUT, DELETE | `/bots/{bot_id}` | Update or delete a bot |
 | GET | `/models` | Return the configured model catalog |
@@ -211,14 +221,16 @@ curl http://127.0.0.1:8000/api/v1/health
 
 ## Local data and secrets
 
-On first start, the server creates a SQLite database under the per-user data directory defined in `server/app/config.py`. Bots, messages, settings, approvals, and audit events survive restarts, with schema migrations tracked in the database. Existing JSON files are imported once and retained as migration copies; credential fields in the old settings file are scrubbed after import.
+On first start, the server creates a SQLite database under the per-user data directory defined in `server/app/config.py`. Bots, messages, settings, approvals, and audit events survive restarts, with schema migrations and a local owner identity tracked in the database. Existing JSON files are imported once and retained as migration copies; credential fields in the old settings file are scrubbed after import.
 
 For local development:
 
+- API routes require authentication. Loopback browser clients receive a session automatically; direct API clients can read `.auth-token` from `DATA_DIR` and send `Authorization: Bearer <token>`.
+- For non-loopback access, set `APP_AUTH_TOKEN` explicitly and configure `NEXT_PUBLIC_API_TOKEN` or call `/auth/login` before using protected routes. Do not expose the generated token through logs or source control.
 - Provider credentials are encrypted at rest with a mode-0600 Fernet key in `DATA_DIR`. Set `APP_ENCRYPTION_KEY` when the key must be supplied by deployment secrets or shared across restarts and hosts.
 - Settings responses never return provider credentials. Enter a new value to replace a stored key, or leave it blank to keep the current one.
 - Back up the SQLite database and encryption key together. If the key is lost, encrypted credentials must be entered again.
-- Keep the API bound to loopback unless you add authentication and tighten CORS.
+- Keep `CORS_ORIGINS` narrow and use HTTPS plus `AUTH_COOKIE_SECURE=1` outside local development.
 - Never commit API keys, local settings, transcripts, or generated environment files.
 - The repository ignores local SQLite files, encryption keys, `.env` files, virtual environments, caches, and build output.
 
@@ -226,8 +238,8 @@ For local development:
 
 The following surfaces are present but should not be mistaken for completed infrastructure:
 
-- **No authentication or authorization:** The API is intended for one local user.
-- **Single-user local storage:** SQLite improves restart durability, but authentication, ownership, backups, and multi-instance coordination are still pending.
+- **Single local owner:** Authentication, bearer validation, and owner-scoped rows are present, but user provisioning, roles beyond the local owner, and multi-user grants are still pending.
+- **Single-user local storage:** SQLite improves restart durability, but multi-user provisioning, backups, and multi-instance coordination are still pending.
 - **No real computer runtime:** The Computer tab is a visual preview; this repository does not provision a browser desktop or provide a working VNC session.
 - **No durable memory or routines:** Conversations persist, but there is no separate memory store, scheduled routine engine, or background worker yet.
 - **No voice or multi-client apps:** Voice, desktop, and mobile clients are not included in this repository.
@@ -267,6 +279,8 @@ curl http://127.0.0.1:8000/api/v1/health
 ```
 
 If the server runs on another host or port, set `NEXT_PUBLIC_API_URL` before starting the client.
+
+If protected API calls return `401`, confirm the browser origin is listed in `CORS_ORIGINS`. For non-loopback deployments, set `NEXT_PUBLIC_API_TOKEN` when building the client or call `/api/v1/auth/login` first.
 
 ### The chat returns a provider error
 

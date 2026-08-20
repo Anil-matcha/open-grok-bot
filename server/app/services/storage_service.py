@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
+from app.services.auth_service import LOCAL_USER_ID
 from app.services.database import Database
 from app.services.secret_store import SecretStore, SecretStoreError
 
@@ -33,6 +34,7 @@ class StorageService:
     def __init__(self, data_dir: Optional[Path] = None):
         self.data_dir = (data_dir or settings.DATA_DIR).expanduser().resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.owner_id = LOCAL_USER_ID
 
         # Keep these paths for the one-time migration and as human-readable
         # recovery copies. Normal reads and writes use SQLite below.
@@ -82,7 +84,9 @@ class StorageService:
         }:
             raise ValueError(f"Unsupported storage table: {table}")
         with self.database.connect() as connection:
-            row = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE owner_id = ?", (self.owner_id,)
+            ).fetchone()
         return int(row[0])
 
     @staticmethod
@@ -242,29 +246,35 @@ class StorageService:
 
     def get_bots(self) -> List[Dict[str, Any]]:
         with self.database.connect() as connection:
-            rows = connection.execute("SELECT payload FROM bots ORDER BY rowid").fetchall()
+            rows = connection.execute(
+                "SELECT payload FROM bots WHERE owner_id = ? ORDER BY rowid",
+                (self.owner_id,),
+            ).fetchall()
         return [payload for row in rows if isinstance((payload := self._decode_payload(row[0])), dict)]
 
     def save_bots(self, bots: List[Dict[str, Any]]):
         with self.database.connect() as connection:
-            connection.execute("DELETE FROM bots")
+            connection.execute("DELETE FROM bots WHERE owner_id = ?", (self.owner_id,))
             for bot in bots:
                 if not isinstance(bot, dict) or not bot.get("id"):
                     continue
                 connection.execute(
-                    "INSERT OR REPLACE INTO bots(id, payload) VALUES (?, ?)",
-                    (str(bot["id"]), json.dumps(bot)),
+                    "INSERT OR REPLACE INTO bots(id, owner_id, payload) VALUES (?, ?, ?)",
+                    (str(bot["id"]), self.owner_id, json.dumps(bot)),
                 )
 
     def get_messages(self, thread_id: Optional[str] = None) -> List[Dict[str, Any]]:
         with self.database.connect() as connection:
             if thread_id:
                 rows = connection.execute(
-                    "SELECT payload FROM messages WHERE thread_id = ? ORDER BY rowid",
-                    (thread_id,),
+                    "SELECT payload FROM messages WHERE owner_id = ? AND thread_id = ? ORDER BY rowid",
+                    (self.owner_id, thread_id),
                 ).fetchall()
             else:
-                rows = connection.execute("SELECT payload FROM messages ORDER BY rowid").fetchall()
+                rows = connection.execute(
+                    "SELECT payload FROM messages WHERE owner_id = ? ORDER BY rowid",
+                    (self.owner_id,),
+                ).fetchall()
         return [payload for row in rows if isinstance((payload := self._decode_payload(row[0])), dict)]
 
     def add_message(self, message: Dict[str, Any]):
@@ -274,28 +284,29 @@ class StorageService:
         thread_id = str(message.get("thread_id") or "")
         with self.database.connect() as connection:
             connection.execute(
-                "INSERT OR REPLACE INTO messages(id, thread_id, payload) VALUES (?, ?, ?)",
-                (message_id, thread_id, json.dumps(message)),
+                "INSERT OR REPLACE INTO messages(id, thread_id, owner_id, payload) VALUES (?, ?, ?, ?)",
+                (message_id, thread_id, self.owner_id, json.dumps(message)),
             )
 
     def save_messages(self, messages: List[Dict[str, Any]]):
         with self.database.connect() as connection:
-            connection.execute("DELETE FROM messages")
+            connection.execute("DELETE FROM messages WHERE owner_id = ?", (self.owner_id,))
             for message in messages:
                 if not isinstance(message, dict):
                     continue
                 message_id = str(message.get("id") or f"msg-{uuid.uuid4().hex}")
                 thread_id = str(message.get("thread_id") or "")
                 connection.execute(
-                    "INSERT OR REPLACE INTO messages(id, thread_id, payload) VALUES (?, ?, ?)",
-                    (message_id, thread_id, json.dumps(message)),
+                    "INSERT OR REPLACE INTO messages(id, thread_id, owner_id, payload) VALUES (?, ?, ?, ?)",
+                    (message_id, thread_id, self.owner_id, json.dumps(message)),
                 )
 
     def get_settings(self) -> Dict[str, Any]:
         values = self._default_settings()
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT key, value, is_secret FROM settings ORDER BY key"
+                "SELECT key, value, is_secret FROM settings WHERE owner_id = ? ORDER BY key",
+                (self.owner_id,),
             ).fetchall()
 
         for row in rows:
@@ -335,21 +346,24 @@ class StorageService:
                     stored_value = json.dumps(value)
                     is_secret = 0
                 connection.execute(
-                    "INSERT INTO settings(key, value, is_secret) VALUES (?, ?, ?) "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
-                    "is_secret = excluded.is_secret",
-                    (key, stored_value, is_secret),
+                    "INSERT INTO settings(key, owner_id, value, is_secret) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET owner_id = excluded.owner_id, "
+                    "value = excluded.value, is_secret = excluded.is_secret",
+                    (key, self.owner_id, stored_value, is_secret),
                 )
 
     def get_approvals(self, thread_id: Optional[str] = None) -> List[Dict[str, Any]]:
         with self.database.connect() as connection:
             if thread_id:
                 rows = connection.execute(
-                    "SELECT payload FROM approvals WHERE thread_id = ? ORDER BY rowid",
-                    (thread_id,),
+                    "SELECT payload FROM approvals WHERE owner_id = ? AND thread_id = ? ORDER BY rowid",
+                    (self.owner_id, thread_id),
                 ).fetchall()
             else:
-                rows = connection.execute("SELECT payload FROM approvals ORDER BY rowid").fetchall()
+                rows = connection.execute(
+                    "SELECT payload FROM approvals WHERE owner_id = ? ORDER BY rowid",
+                    (self.owner_id,),
+                ).fetchall()
         return [payload for row in rows if isinstance((payload := self._decode_payload(row[0])), dict)]
 
     def add_approval(self, approval: Dict[str, Any]):
@@ -357,10 +371,11 @@ class StorageService:
             return
         with self.database.connect() as connection:
             connection.execute(
-                "INSERT OR REPLACE INTO approvals(request_id, thread_id, payload) VALUES (?, ?, ?)",
+                "INSERT OR REPLACE INTO approvals(request_id, thread_id, owner_id, payload) VALUES (?, ?, ?, ?)",
                 (
                     str(approval["request_id"]),
                     approval.get("thread_id"),
+                    self.owner_id,
                     json.dumps(approval),
                 ),
             )
@@ -368,7 +383,8 @@ class StorageService:
     def update_approval(self, request_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT payload FROM approvals WHERE request_id = ?", (request_id,)
+                "SELECT payload FROM approvals WHERE owner_id = ? AND request_id = ?",
+                (self.owner_id, request_id),
             ).fetchone()
             if not row:
                 return None
@@ -377,8 +393,15 @@ class StorageService:
                 return None
             approval.update(updates)
             connection.execute(
-                "UPDATE approvals SET thread_id = ?, payload = ? WHERE request_id = ?",
-                (approval.get("thread_id"), json.dumps(approval), request_id),
+                "UPDATE approvals SET thread_id = ?, owner_id = ?, payload = ? "
+                "WHERE owner_id = ? AND request_id = ?",
+                (
+                    approval.get("thread_id"),
+                    self.owner_id,
+                    json.dumps(approval),
+                    self.owner_id,
+                    request_id,
+                ),
             )
         return approval
 
@@ -386,8 +409,8 @@ class StorageService:
         bounded_limit = max(1, min(limit, 500))
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT payload FROM audit_events ORDER BY id DESC LIMIT ?",
-                (bounded_limit,),
+                "SELECT payload FROM audit_events WHERE owner_id = ? ORDER BY id DESC LIMIT ?",
+                (self.owner_id, bounded_limit),
             ).fetchall()
         return [
             payload
@@ -401,8 +424,8 @@ class StorageService:
         created_at = str(event.get("created_at") or _now())
         with self.database.connect() as connection:
             connection.execute(
-                "INSERT INTO audit_events(created_at, payload) VALUES (?, ?)",
-                (created_at, json.dumps(event)),
+                "INSERT INTO audit_events(created_at, owner_id, payload) VALUES (?, ?, ?)",
+                (created_at, self.owner_id, json.dumps(event)),
             )
 
 

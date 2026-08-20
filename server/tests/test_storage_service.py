@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from app.services.storage_service import StorageService
+from app.services.database import SCHEMA_MIGRATIONS
 from app.schemas.contracts import AppSettingsSchema
 from app.routers import settings as settings_router
 
@@ -54,7 +55,12 @@ class StorageServiceTests(unittest.TestCase):
             version = connection.execute(
                 "SELECT MAX(version) FROM schema_migrations"
             ).fetchone()[0]
-        self.assertEqual(version, 1)
+        self.assertEqual(version, 2)
+        with sqlite3.connect(reopened.db_path) as connection:
+            owner_id = connection.execute(
+                "SELECT owner_id FROM bots WHERE id = ?", ("bot-test",)
+            ).fetchone()[0]
+        self.assertEqual(owner_id, "local-user")
 
     def test_legacy_json_is_imported_and_plaintext_keys_are_scrubbed(self):
         legacy_root = self.root / "legacy"
@@ -135,6 +141,35 @@ class StorageServiceTests(unittest.TestCase):
             self.assertEqual(self.service.get_settings()["muapi_api_key"], "route-secret")
         finally:
             settings_router.storage_service = original_storage
+
+    def test_schema_one_is_upgraded_with_owner_columns(self):
+        upgrade_root = self.root / "schema-one"
+        upgrade_root.mkdir()
+        db_path = upgrade_root / "open-grok-bot.sqlite3"
+        with sqlite3.connect(db_path) as connection:
+            connection.executescript(SCHEMA_MIGRATIONS[1])
+            connection.execute(
+                "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+            )
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (1, '2026-08-20T00:00:00+00:00')"
+            )
+            connection.execute(
+                "INSERT INTO bots(id, payload) VALUES (?, ?)",
+                ("old-bot", json.dumps({"id": "old-bot", "name": "Old bot"})),
+            )
+
+        upgraded = StorageService(upgrade_root)
+        self.assertEqual(upgraded.get_bots()[0]["id"], "old-bot")
+        with sqlite3.connect(db_path) as connection:
+            version = connection.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone()[0]
+            owner_id = connection.execute(
+                "SELECT owner_id FROM bots WHERE id = 'old-bot'"
+            ).fetchone()[0]
+        self.assertEqual(version, 2)
+        self.assertEqual(owner_id, "local-user")
 
     def _write_json(self, root: Path, name: str, value):
         (root / name).write_text(json.dumps(value), encoding="utf-8")

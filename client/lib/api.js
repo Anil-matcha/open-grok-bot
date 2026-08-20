@@ -1,8 +1,47 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
+const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || '';
+
+let sessionPromise = null;
+
+function withAuthHeaders(headers = {}) {
+  const merged = new Headers(headers);
+  if (API_TOKEN && !merged.has('Authorization')) {
+    merged.set('Authorization', `Bearer ${API_TOKEN}`);
+  }
+  return merged;
+}
+
+async function ensureSession() {
+  if (typeof window === 'undefined') return null;
+  if (!sessionPromise) {
+    sessionPromise = fetch(`${API_BASE_URL}/auth/session`, {
+      credentials: 'include',
+      headers: withAuthHeaders(),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('Authentication required');
+        return res.json();
+      })
+      .catch((err) => {
+        sessionPromise = null;
+        throw err;
+      });
+  }
+  return sessionPromise;
+}
+
+async function apiFetch(url, options = {}) {
+  await ensureSession();
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: withAuthHeaders(options.headers),
+  });
+}
 
 export async function fetchBots() {
   try {
-    const res = await fetch(`${API_BASE_URL}/bots`);
+    const res = await apiFetch(`${API_BASE_URL}/bots`);
     if (!res.ok) return [];
     return await res.json();
   } catch (err) {
@@ -12,7 +51,7 @@ export async function fetchBots() {
 }
 
 export async function createBot(botData) {
-  const res = await fetch(`${API_BASE_URL}/bots`, {
+  const res = await apiFetch(`${API_BASE_URL}/bots`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(botData),
@@ -22,7 +61,7 @@ export async function createBot(botData) {
 }
 
 export async function updateBot(botId, updates) {
-  const res = await fetch(`${API_BASE_URL}/bots/${botId}`, {
+  const res = await apiFetch(`${API_BASE_URL}/bots/${botId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -32,14 +71,14 @@ export async function updateBot(botId, updates) {
 }
 
 export async function deleteBot(botId) {
-  const res = await fetch(`${API_BASE_URL}/bots/${botId}`, { method: 'DELETE' });
+  const res = await apiFetch(`${API_BASE_URL}/bots/${botId}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete bot');
   return res.json();
 }
 
 export async function fetchModels() {
   try {
-    const res = await fetch(`${API_BASE_URL}/models`);
+    const res = await apiFetch(`${API_BASE_URL}/models`);
     if (!res.ok) return [];
     return await res.json();
   } catch (err) {
@@ -50,7 +89,7 @@ export async function fetchModels() {
 
 export async function fetchChatHistory(threadId) {
   try {
-    const res = await fetch(`${API_BASE_URL}/chat/history/${threadId}`);
+    const res = await apiFetch(`${API_BASE_URL}/chat/history/${threadId}`);
     if (!res.ok) return [];
     return await res.json();
   } catch (err) {
@@ -61,7 +100,7 @@ export async function fetchChatHistory(threadId) {
 
 export async function sendMessage(threadId, botId, text, model = 'grok-4-5', imageUrl = null) {
   try {
-    const res = await fetch(`${API_BASE_URL}/chat/send`, {
+    const res = await apiFetch(`${API_BASE_URL}/chat/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -83,7 +122,7 @@ export async function sendMessage(threadId, botId, text, model = 'grok-4-5', ima
 export async function uploadImage(file) {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch(`${API_BASE_URL}/upload`, {
+  const res = await apiFetch(`${API_BASE_URL}/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -96,7 +135,7 @@ export async function uploadImage(file) {
 
 export async function fetchConnectorCatalog() {
   try {
-    const res = await fetch(`${API_BASE_URL}/connectors/catalog`);
+    const res = await apiFetch(`${API_BASE_URL}/connectors/catalog`);
     if (!res.ok) return { cards: [], source: 'curated', configured: false };
     return await res.json();
   } catch (err) {
@@ -108,7 +147,7 @@ export async function fetchConnectorCatalog() {
 export async function fetchConnectionStatus(slugs = []) {
   if (!slugs.length) return { services: {} };
   try {
-    const res = await fetch(`${API_BASE_URL}/connectors?services=${encodeURIComponent(slugs.join(','))}`);
+    const res = await apiFetch(`${API_BASE_URL}/connectors?services=${encodeURIComponent(slugs.join(','))}`);
     if (!res.ok) return { services: {} };
     return await res.json();
   } catch (err) {
@@ -118,20 +157,20 @@ export async function fetchConnectionStatus(slugs = []) {
 }
 
 export async function authorizeConnector(slug) {
-  const res = await fetch(`${API_BASE_URL}/connectors/${slug}/authorize`, { method: 'POST' });
+  const res = await apiFetch(`${API_BASE_URL}/connectors/${slug}/authorize`, { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to authorize ${slug}`);
   return res.json();
 }
 
 export async function disconnectConnector(slug) {
-  const res = await fetch(`${API_BASE_URL}/connectors/${slug}`, { method: 'DELETE' });
+  const res = await apiFetch(`${API_BASE_URL}/connectors/${slug}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`Failed to disconnect ${slug}`);
   return res.json();
 }
 
 export async function fetchAuditEvents(limit = 100) {
   try {
-    const res = await fetch(`${API_BASE_URL}/audit?limit=${encodeURIComponent(limit)}`);
+    const res = await apiFetch(`${API_BASE_URL}/audit?limit=${encodeURIComponent(limit)}`);
     if (!res.ok) return [];
     return await res.json();
   } catch (err) {
@@ -143,36 +182,41 @@ export async function fetchAuditEvents(limit = 100) {
 export function subscribeToChatStream(threadId, model, onEvent, onError) {
   const url = `${API_BASE_URL}/chat/stream/${threadId}?model=${encodeURIComponent(model)}`;
   let eventSource = null;
+  let cancelled = false;
 
-  try {
-    eventSource = new EventSource(url);
+  ensureSession()
+    .then(() => {
+      if (cancelled) return;
+      eventSource = new EventSource(url, { withCredentials: true });
 
-    eventSource.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent(data);
-      } catch (err) {
-        console.warn('Failed to parse SSE payload:', err);
-      }
-    };
+      eventSource.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (onEvent) onEvent(data);
+        } catch (err) {
+          console.warn('Failed to parse SSE payload:', err);
+        }
+      };
 
-    eventSource.onerror = (err) => {
-      // Gracefully close stream when completed or disconnected
-      if (eventSource) {
-        eventSource.close();
-      }
+      eventSource.onerror = (err) => {
+        // Gracefully close stream when completed or disconnected
+        if (eventSource) {
+          eventSource.close();
+        }
+        if (onError && typeof onError === 'function') {
+          onError(err);
+        }
+      };
+    })
+    .catch((err) => {
+      console.warn('Authentication or EventSource initialization error:', err);
       if (onError && typeof onError === 'function') {
         onError(err);
       }
-    };
-  } catch (err) {
-    console.warn('EventSource initialization error:', err);
-    if (onError && typeof onError === 'function') {
-      onError(err);
-    }
-  }
+    });
 
   return () => {
+    cancelled = true;
     if (eventSource) {
       eventSource.close();
     }
@@ -180,7 +224,7 @@ export function subscribeToChatStream(threadId, model, onEvent, onError) {
 }
 
 export async function respondApproval(requestId, action) {
-  const res = await fetch(`${API_BASE_URL}/approvals/respond`, {
+  const res = await apiFetch(`${API_BASE_URL}/approvals/respond`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ request_id: requestId, action }),
@@ -191,7 +235,7 @@ export async function respondApproval(requestId, action) {
 
 export async function fetchSettings() {
   try {
-    const res = await fetch(`${API_BASE_URL}/settings`);
+    const res = await apiFetch(`${API_BASE_URL}/settings`);
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -201,7 +245,7 @@ export async function fetchSettings() {
 }
 
 export async function saveSettings(settingsData) {
-  const res = await fetch(`${API_BASE_URL}/settings`, {
+  const res = await apiFetch(`${API_BASE_URL}/settings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settingsData),

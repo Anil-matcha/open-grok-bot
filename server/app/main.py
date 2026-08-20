@@ -1,6 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import bots, models, chat, approvals, upload, settings as settings_router, connectors, audit
+from fastapi.responses import JSONResponse
+
+from app.config import settings
+from app.routers import auth, bots, models, chat, approvals, upload, settings as settings_router, connectors, audit
+from app.services.auth_service import auth_service
 
 app = FastAPI(
     title="Open Grok Bot API",
@@ -11,12 +15,42 @@ app = FastAPI(
 # Configure CORS for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+PUBLIC_API_PATHS = {
+    "/api/v1/health",
+    "/api/v1/auth/status",
+    "/api/v1/auth/session",
+    "/api/v1/auth/login",
+    "/api/v1/auth/logout",
+}
+
+
+@app.middleware("http")
+async def require_authentication(request: Request, call_next):
+    path = request.url.path
+    if (
+        request.method == "OPTIONS"
+        or not path.startswith("/api/v1")
+        or path in PUBLIC_API_PATHS
+    ):
+        return await call_next(request)
+
+    user = auth_service.authenticate_request(request)
+    if not user:
+        return JSONResponse(
+            {"detail": "Authentication is required."},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    request.state.user = user
+    return await call_next(request)
+
+app.include_router(auth.router)
 app.include_router(bots.router)
 app.include_router(models.router)
 app.include_router(chat.router)
