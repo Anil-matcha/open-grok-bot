@@ -227,23 +227,36 @@ export default function ComputerPanel({ bot, onBackToChat }) {
           <div className="flex-1 bg-slate-950 flex items-center justify-center relative p-6 min-h-0">
             {activeTab === 'display' ? (
               screen?.available ? (
-                <div className="w-full h-full rounded-xl border border-slate-800/80 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950/40 p-4 flex flex-col justify-between shadow-2xl relative overflow-hidden">
-                  <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800/60 pb-2">
-                    <span className="font-mono text-cyan-400">Provider frame metadata</span>
-                    <span>{screen.frame_id}</span>
+                screen.data ? (
+                  <div className="w-full h-full rounded-xl border border-slate-800 bg-black flex items-center justify-center relative overflow-hidden shadow-2xl">
+                    <img
+                      src={`data:image/${screen.format || 'jpeg'};base64,${screen.data}`}
+                      alt={`Computer frame ${screen.frame_id || ''}`}
+                      className="max-w-full max-h-full object-contain"
+                    />
+                    <span className="absolute top-3 right-3 rounded bg-black/70 px-2 py-1 text-[10px] font-mono text-slate-300">
+                      {screen.frame_id}
+                    </span>
                   </div>
-                  <div className="font-mono text-xs space-y-2 my-auto">
-                    <p className="text-emerald-400">✓ Computer is {screen.state}</p>
-                    <p className="text-slate-400">Provider: {screen.provider}</p>
-                    <p className="text-slate-400">Generation: {screen.generation}</p>
-                    <p className="text-amber-400">{screen.message}</p>
-                    <p className="text-slate-500 animate-pulse">Polling for the next frame…</p>
+                ) : (
+                  <div className="w-full h-full rounded-xl border border-slate-800/80 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950/40 p-4 flex flex-col justify-between shadow-2xl relative overflow-hidden">
+                    <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800/60 pb-2">
+                      <span className="font-mono text-cyan-400">Provider frame metadata</span>
+                      <span>{screen.frame_id}</span>
+                    </div>
+                    <div className="font-mono text-xs space-y-2 my-auto">
+                      <p className="text-emerald-400">✓ Computer is {screen.state}</p>
+                      <p className="text-slate-400">Provider: {screen.provider}</p>
+                      <p className="text-slate-400">Generation: {screen.generation}</p>
+                      <p className="text-amber-400">{screen.message}</p>
+                      <p className="text-slate-500 animate-pulse">Polling for the next frame…</p>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-2 border-t border-slate-800/60">
+                      <span>Actual pixels require a runtime adapter.</span>
+                      <span>{screen.width}x{screen.height}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-500 pt-2 border-t border-slate-800/60">
-                    <span>Actual pixels require a runtime adapter.</span>
-                    <span>{screen.width}x{screen.height}</span>
-                  </div>
-                </div>
+                )
               ) : (
                 <div className="w-full h-full rounded-xl border border-dashed border-slate-800 flex flex-col items-center justify-center text-center p-8">
                   <FiMonitor className="text-4xl text-slate-700 mb-4" />

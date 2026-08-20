@@ -1,0 +1,12 @@
+{
+  "comment": "Allow Chromium to create user namespaces while retaining Docker's default seccomp profile.",
+  "names": [
+    "clone",
+    "setns",
+    "unshare"
+  ],
+  "action": "SCMP_ACT_ALLOW",
+  "args": [],
+  "includes": {},
+  "excludes": {}
+}

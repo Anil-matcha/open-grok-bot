@@ -77,6 +77,20 @@ You can also enter the provider key from **App Settings → Connections** after 
 
 The local server creates a mode-0600 session token in `DATA_DIR` and the browser establishes an HttpOnly session automatically when connecting from loopback. For a deployment accessed beyond the local machine, set `APP_AUTH_TOKEN` on the server and expose the same value to the client as `NEXT_PUBLIC_API_TOKEN` through the deployment environment.
 
+### Optional Docker computer runtime
+
+The default provider is the deterministic local adapter. To enable real browser, terminal, file, input, and screenshot operations, build the pinned runtime image and opt in to the Docker provider:
+
+```bash
+docker build -t open-grok-bot-computer:1.62.1 ./runtime
+export COMPUTER_PROVIDER=docker
+export COMPUTER_DOCKER_IMAGE=open-grok-bot-computer:1.62.1
+```
+
+The Docker daemon must be running before starting the API. Each bot gets a separate container, a separate workspace under `DATA_DIR/computers`, an ephemeral loopback-only port, and an internal runtime token. The container root is read-only, capabilities are dropped, and CPU, memory, process, and shared-memory limits are applied. The current runtime provides browser screenshots and approved operations; human takeover and a desktop/VNC surface remain follow-up work.
+
+This is a local development runtime, not a hardened hostile-web sandbox. Follow the [official Playwright Docker guidance](https://playwright.dev/docs/docker) and do not send untrusted websites or credentials through it until network egress, image provenance, and stronger sandboxing are reviewed for your deployment.
+
 ## Configuration
 
 The client defaults to `http://127.0.0.1:8000/api/v1`. Set `NEXT_PUBLIC_API_URL` if the API runs elsewhere:
@@ -99,6 +113,14 @@ The server reads these variables from the environment:
 | `AUTH_SESSION_MAX_AGE` | `86400` | Session-cookie lifetime in seconds |
 | `AUTH_COOKIE_SECURE` | `0` | Set to `1` when serving over HTTPS |
 | `CORS_ORIGINS` | localhost and loopback client origins | Comma-separated browser origins allowed by the API |
+| `COMPUTER_PROVIDER` | `fake` | Computer adapter: `fake` or `docker` |
+| `COMPUTER_DOCKER_IMAGE` | `open-grok-bot-computer:1.62.1` | Pinned local runtime image |
+| `COMPUTER_DOCKER_WORKSPACE_ROOT` | `DATA_DIR/computers` | Root for per-bot runtime workspaces |
+| `COMPUTER_DOCKER_CPU_LIMIT` | `2.0` | Docker CPU limit per computer |
+| `COMPUTER_DOCKER_MEMORY_LIMIT` | `2g` | Docker memory limit per computer |
+| `COMPUTER_DOCKER_PIDS_LIMIT` | `512` | Maximum processes per computer |
+| `COMPUTER_DOCKER_START_TIMEOUT` | `20` | Runtime readiness timeout in seconds |
+| `COMPUTER_DOCKER_COMMAND_TIMEOUT` | `30` | Docker/driver operation timeout in seconds |
 | `WORKSPACE_ROOT` | repository root | Maximum directory that approved workspace tools can access |
 | `WORKSPACE_MAX_FILE_BYTES` | `131072` | Read/write size limit for workspace files |
 | `APPROVAL_TIMEOUT_SECONDS` | `120` | How long a pending approval remains open |
@@ -128,7 +150,8 @@ Next.js client  ── HTTP + SSE ──▶  FastAPI server
            state/settings/audit   model + upload  connector endpoints
                                      │
                                      ▼
-                              Computer provider
+                         Computer provider
+                       fake or Docker/Playwright
                               + action gateway
 ```
 
@@ -151,8 +174,10 @@ The main code areas are:
 | `server/app/services/composio_service.py` | Server-side Composio MCP calls and normalized GitHub issue results |
 | `server/app/services/connector_actions.py` | Explicit connector command parsing and gateway registration |
 | `server/app/services/computer_provider.py` | Provider contract and deterministic local computer adapter |
+| `server/app/services/docker_computer_provider.py` | Per-bot Docker lifecycle, token boundary, and runtime operations |
 | `server/app/services/computer_actions.py` | Computer action definitions and gateway executors |
 | `server/app/routers/computers.py` | Authenticated computer lifecycle, screen, and approval continuation routes |
+| `runtime/` | Pinned Playwright container image and authenticated runtime driver |
 | `server/app/schemas/contracts.py` | Pydantic request and response models |
 | `server/tests/` | Focused workspace, approval, persistence, auth, and provider regression tests |
 
@@ -169,7 +194,7 @@ The main code areas are:
 
 ### Product direction
 
-The prototype follows a local-first path: persistent bot personas and histories, explicit capabilities, user-visible approvals, provider flexibility, and optional app connectors. The next meaningful layers are durable memory and routines, voice input/output, browser and desktop execution, isolated computer providers, background jobs, and authenticated multi-user deployment. They are intentionally documented as roadmap items rather than implied by the current UI.
+The prototype follows a local-first path: persistent bot personas and histories, explicit capabilities, user-visible approvals, provider flexibility, optional app connectors, and an opt-in isolated browser runtime. The next meaningful layers are durable memory and routines, voice input/output, human takeover, desktop/VNC presentation, background jobs, and authenticated multi-user deployment. They are intentionally documented as roadmap items rather than implied by the current UI.
 
 ### Approved workspace commands
 
@@ -259,10 +284,10 @@ The following surfaces are present but should not be mistaken for completed infr
 
 - **Single local owner:** Authentication, bearer validation, and owner-scoped rows are present, but user provisioning, roles beyond the local owner, and multi-user grants are still pending.
 - **Single-user local storage:** SQLite improves restart durability, but multi-user provisioning, backups, and multi-instance coordination are still pending.
-- **No isolated computer runtime yet:** The provider contract, lifecycle, gateway routes, and deterministic fake adapter are present, but the repository does not provision a browser desktop, execute terminal processes, stream real pixels, or provide a working VNC session.
+- **Docker runtime is opt-in:** The Docker/Playwright provider and image are included, but live container startup depends on a running Docker daemon and a locally built image. The current runtime has browser screenshots and controlled operations, not a full desktop or VNC session.
 - **No durable memory or routines:** Conversations persist, but there is no separate memory store, scheduled routine engine, or background worker yet.
 - **No voice or multi-client apps:** Voice, desktop, and mobile clients are not included in this repository.
-- **Workspace and computer tools are intentionally narrow:** Workspace commands support confined file listing, reads, and writes. Computer operations have a provider contract and approval path, but the current adapter records safe metadata instead of launching processes or controlling a browser.
+- **Workspace and computer tools are intentionally narrow:** Workspace commands support confined file listing, reads, and writes. Docker computer operations run in a bot-scoped container and require approval for browser navigation, terminal commands, and input; human takeover and unrestricted desktop control are not implemented.
 - **Connector actions are intentionally narrow:** Chat currently exposes only GitHub issue listing and approval-gated issue creation. Dynamic tool discovery, arbitrary connector calls, and other connector writes remain roadmap work.
 - **Provider streaming is adapter-level:** Depending on the provider response, the service may receive a completed result and emit it to the UI in small deltas.
 - **No CI workflow is included yet:** Focused workspace, approval, auth, persistence, and provider tests are present, but broader runtime integration and browser tests remain to be added.
@@ -300,6 +325,18 @@ curl http://127.0.0.1:8000/api/v1/health
 If the server runs on another host or port, set `NEXT_PUBLIC_API_URL` before starting the client.
 
 If protected API calls return `401`, confirm the browser origin is listed in `CORS_ORIGINS`. For non-loopback deployments, set `NEXT_PUBLIC_API_TOKEN` when building the client or call `/api/v1/auth/login` first.
+
+### The Docker computer stays unavailable
+
+Confirm that the daemon is running, the runtime image was built, and the API uses the Docker adapter:
+
+```bash
+docker info
+docker image inspect open-grok-bot-computer:1.62.1
+echo "$COMPUTER_PROVIDER"
+```
+
+The API intentionally reports a failed Docker start instead of silently executing the task in the fake adapter. Keep `COMPUTER_PROVIDER=fake` when Docker is not available.
 
 ### The chat returns a provider error
 

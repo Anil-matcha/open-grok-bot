@@ -1,9 +1,9 @@
 """Provider-neutral computer runtime contract and deterministic local adapter.
 
 The application talks to a computer through this contract rather than through
-vendor-specific browser, desktop, or container APIs.  The fake adapter keeps
+vendor-specific browser, desktop, or container APIs. The fake adapter keeps
 the lifecycle and action shapes usable in local development and tests without
-launching processes or connecting to a remote machine.
+launching processes; the optional Docker adapter supplies the isolated runtime.
 """
 
 from __future__ import annotations
@@ -40,6 +40,12 @@ def _computer_id(bot_id: str) -> str:
     if not normalized:
         raise ComputerProviderError("The bot id cannot produce a valid computer id.")
     return f"computer-{normalized[:80]}"
+
+
+def computer_id_for_bot(bot_id: str) -> str:
+    """Return the stable provider id without creating a runtime."""
+
+    return _computer_id(bot_id)
 
 
 @dataclass
@@ -345,4 +351,16 @@ class FakeComputerProvider:
         }
 
 
-computer_provider = FakeComputerProvider()
+def build_computer_provider() -> ComputerProvider:
+    """Select the configured adapter without making Docker a test prerequisite."""
+
+    from app.config import settings
+
+    if settings.COMPUTER_PROVIDER == "docker":
+        from app.services.docker_computer_provider import DockerComputerProvider
+
+        return DockerComputerProvider()
+    return FakeComputerProvider()
+
+
+computer_provider = build_computer_provider()

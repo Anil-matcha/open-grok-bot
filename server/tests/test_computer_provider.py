@@ -186,10 +186,11 @@ class ComputerRouterTests(unittest.IsolatedAsyncioTestCase):
                 f"/api/v1/computers/{bot_id}/actions",
                 json={
                     "action": "terminal_execute",
-                    "arguments": {"command": "echo safe"},
+                    "arguments": {"command": "echo safe", "bot_id": "bot-other"},
                 },
             )
             self.assertEqual(action.status_code, 202)
+            self.assertEqual(action.json()["request"]["bot_id"], bot_id)
             request_id = action.json()["request"]["request_id"]
 
             decision = await client.post(

@@ -59,8 +59,12 @@ async def _run_action(
 ):
     _ensure_bot(bot_id)
     status = computer_provider.describe(bot_id)
-    action_arguments = {"bot_id": bot_id, "computer_id": status.computer_id}
-    action_arguments.update(arguments or {})
+    action_arguments = dict(arguments or {})
+    # The URL path is the ownership boundary; callers cannot redirect an
+    # action to another bot by smuggling ids inside its argument object.
+    action_arguments.pop("bot_id", None)
+    action_arguments.pop("computer_id", None)
+    action_arguments.update({"bot_id": bot_id, "computer_id": status.computer_id})
     call = ActionInvocation(
         name=f"computer.{action}",
         arguments=action_arguments,

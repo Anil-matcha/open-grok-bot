@@ -68,5 +68,6 @@ async def health_check():
         "status": "online",
         "service": "Open Grok Bot FastAPI Backend",
         "provider": "MUAPI API Endpoints",
+        "computer_provider": settings.COMPUTER_PROVIDER,
         "default_model": "grok-4-5"
     }
