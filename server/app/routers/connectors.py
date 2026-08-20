@@ -5,12 +5,12 @@ from fastapi.responses import JSONResponse
 from typing import List, Optional
 from datetime import datetime, timezone
 from app.config import settings
+from app.services.composio_service import composio_service
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/connectors", tags=["connectors"])
 
 BACKEND_URL = "https://backend.composio.dev/api/v3"
-CONNECT_URL = "https://connect.composio.dev/mcp"
 
 # ─── Curated fallback catalog ────────────────────────────────────────────────
 CURATED = [
@@ -49,42 +49,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _parse_mcp_response(text: str) -> dict:
-    import json
-    line = text if text.startswith("{") else next(
-        (l[6:] for l in text.splitlines() if l.startswith("data: ")), None
-    )
-    if not line:
-        raise ValueError("empty MCP response")
-    msg = json.loads(line)
-    if msg.get("error"):
-        raise ValueError(msg["error"].get("message", "MCP error"))
-    content = next(
-        (c.get("text") for c in (msg.get("result", {}).get("content") or []) if c.get("type") == "text"),
-        None
-    )
-    if not content:
-        return msg.get("result") or {}
-    try:
-        return json.loads(content)
-    except Exception:
-        return {"text": content}
-
-
 async def _composio_tool(key: str, name: str, args: dict) -> dict:
-    async with httpx.AsyncClient(timeout=30) as client:
-        res = await client.post(
-            CONNECT_URL,
-            headers={
-                "content-type": "application/json",
-                "accept": "application/json, text/event-stream",
-                "x-consumer-api-key": key,
-            },
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                  "params": {"name": name, "arguments": args}},
-        )
-        res.raise_for_status()
-        return await _parse_mcp_response(res.text)
+    return await composio_service.call_tool(name, args, api_key=key)
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────

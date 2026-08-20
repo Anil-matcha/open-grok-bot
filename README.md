@@ -20,6 +20,7 @@ This is an independent open-source project and is not affiliated with xAI.
 - **Governed action gateway:** Workspace actions use a structured request/result contract, a deny-by-default registry, approval state, and redacted lifecycle audit records.
 - **Settings drawer:** Configure the MUAPI key, provider base URL, default model, Composio key, and local profile details.
 - **Connector surface:** Browse a curated or live Composio app catalog, inspect connection status, and start OAuth authorization explicitly from Marketplace.
+- **Read-only GitHub action:** After connecting GitHub, run an explicit issue lookup from chat and pass its structured result through the action gateway.
 - **Audit trail:** Review local approval, workspace-tool, and connector events from the sidebar.
 - **Computer workspace surface:** Preview the intended computer/terminal experience while the runtime integration is still being built.
 
@@ -133,6 +134,8 @@ The main code areas are:
 | `server/app/services/workspace_service.py` | Confined list/read/write workspace tools |
 | `server/app/services/approval_broker.py` | Pending approval coordination and audit events |
 | `server/app/services/action_gateway.py` | Registered action policy, approval handoff, execution, and lifecycle audit |
+| `server/app/services/composio_service.py` | Server-side Composio MCP calls and normalized GitHub issue results |
+| `server/app/services/connector_actions.py` | Explicit connector command parsing and gateway registration |
 | `server/app/schemas/contracts.py` | Pydantic request and response models |
 | `server/tests/` | Focused workspace and approval regression tests |
 
@@ -141,9 +144,9 @@ The main code areas are:
 1. The client posts the user message to `/api/v1/chat/send`.
 2. The server stores it in the local message store.
 3. The client opens an EventSource connection to `/api/v1/chat/stream/{thread_id}`.
-4. An explicit workspace request becomes a structured action request and is checked against the deny-by-default gateway registry.
-5. The gateway pauses the stream until the user allows or denies the action, then executes approved work inside `WORKSPACE_ROOT`.
-6. The gateway emits normalized action lifecycle records; the client receives compatible tool events and the approved result.
+4. An explicit workspace or connector request becomes a structured action request and is checked against the deny-by-default gateway registry.
+5. The gateway pauses the stream for approval when required, then executes the registered action.
+6. The gateway emits normalized action lifecycle records; the client receives compatible tool events and the structured result.
 7. The server sends the selected model, recent history, and tool result to MUAPI.
 8. Provider output is forwarded as SSE deltas and the completed assistant message is persisted.
 
@@ -163,6 +166,14 @@ file content on the next line
 ```
 
 Paths must remain inside `WORKSPACE_ROOT`. Reads and writes are limited by `WORKSPACE_MAX_FILE_BYTES`, and every request/decision/result is recorded in the local audit store.
+
+The first connector action is intentionally explicit and read-only:
+
+```text
+/connector github issues <owner>/<repo> [open|closed|all]
+```
+
+It requires a configured Composio key and an active GitHub connection. Results are limited to issue summaries; credentials and issue bodies are not copied into the action result or audit summary.
 
 ## API
 
@@ -213,7 +224,7 @@ The following surfaces are present but should not be mistaken for completed infr
 - **No durable memory or routines:** Conversations persist, but there is no separate memory store, scheduled routine engine, or background worker yet.
 - **No voice or multi-client apps:** Voice, desktop, and mobile clients are not included in this repository.
 - **Workspace tools are intentionally narrow:** The first tool loop supports confined file listing, reads, and writes only. Arbitrary shell commands, browser control, and background agents are not implemented.
-- **Connectors are not agent tools yet:** The catalog and optional connection routes exist, but enabled apps are not currently invoked from the chat model loop.
+- **Connector actions are intentionally narrow:** Chat currently exposes only the explicit read-only GitHub issue lookup. Dynamic tool discovery, arbitrary connector calls, and connector writes remain roadmap work.
 - **Provider streaming is adapter-level:** Depending on the provider response, the service may receive a completed result and emit it to the UI in small deltas.
 - **No CI workflow is included yet:** Focused workspace and approval tests are present, but broader API, provider, and browser tests remain to be added.
 

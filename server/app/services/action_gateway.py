@@ -7,6 +7,7 @@ always rejected.
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import inspect
 import uuid
 import re
 from typing import Any, Callable, Dict, Literal, Mapping, Optional, Tuple
@@ -338,7 +339,7 @@ class ActionGateway:
                 summary[key] = str(value)
         return redact_sensitive(summary)
 
-    def execute(self, request: ActionRequest) -> ActionResult:
+    async def execute(self, request: ActionRequest) -> ActionResult:
         pending = self._pending.get(request.request_id)
         if pending is None:
             raise ActionGatewayError("Action request is no longer available for execution.")
@@ -362,6 +363,8 @@ class ActionGateway:
         self._audit_action("action.started", request, state="running")
         try:
             result = executor(call)
+            if inspect.isawaitable(result):
+                result = await result
             if not isinstance(result, dict):
                 raise ActionGatewayError("Action executors must return a JSON object.")
             self._audit_action(

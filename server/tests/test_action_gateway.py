@@ -77,7 +77,7 @@ class ActionGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(approval["request_id"], request.request_id)
 
         self.assertEqual(await self.gateway.wait_for_decision(request), "allow")
-        action_result = self.gateway.execute(request)
+        action_result = await self.gateway.execute(request)
 
         self.assertEqual(action_result.status, "completed")
         self.assertEqual(action_result.result["content"], "private workspace content")
@@ -134,7 +134,7 @@ class ActionGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(approval)
         self.assertEqual(request.state, "approved")
         self.assertEqual(await self.gateway.wait_for_decision(request), "allow")
-        result = self.gateway.execute(request)
+        result = await self.gateway.execute(request)
 
         self.assertEqual(result.status, "completed")
         self.assertTrue(result.result["found"])
@@ -163,7 +163,7 @@ class ActionGatewayTests(unittest.IsolatedAsyncioTestCase):
         request, approval = self.gateway.open("thread-test", "bot-test", call)
         self.assertEqual(approval["request_id"], request.request_id)
         self.assertEqual(await self.gateway.wait_for_decision(request), "allow")
-        result = self.gateway.execute(request)
+        result = await self.gateway.execute(request)
 
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.result["image_ref"], "fake-screen-1")

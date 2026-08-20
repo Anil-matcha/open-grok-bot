@@ -14,6 +14,7 @@ from app.services.action_gateway import (
     ActionPolicyError,
     action_gateway,
 )
+from app.services.connector_actions import ConnectorCommandError, parse_connector_command
 from app.services.workspace_service import (
     WorkspaceToolError,
     parse_workspace_command,
@@ -80,56 +81,54 @@ async def stream_turn(thread_id: str, model: Optional[str] = Query("grok-4-5")):
 
         last_user_text = formatted_history[-1]["content"] if formatted_history else ""
         try:
-            workspace_call = parse_workspace_command(last_user_text)
-        except WorkspaceToolError as exc:
-            workspace_call = None
-            tool_context = f"A workspace request was rejected before execution: {exc}"
+            action_call = parse_workspace_command(last_user_text)
+            if action_call is None:
+                action_call = parse_connector_command(last_user_text)
+        except (WorkspaceToolError, ConnectorCommandError) as exc:
+            action_call = None
+            command_tool = "connector" if last_user_text.lower().startswith("/connector") else "workspace"
+            tool_context = f"A {command_tool} request was rejected before execution: {exc}"
             yield {
                 "event": "message",
                 "data": json.dumps({
                     "type": "tool.failed",
-                    "tool": "workspace",
+                    "tool": command_tool,
                     "error": str(exc),
                 }),
             }
 
-        if workspace_call:
+        if action_call:
             try:
                 action_request, approval = action_gateway.open(
                     thread_id,
                     thread_id,
-                    workspace_call,
+                    action_call,
                 )
             except ActionPolicyError as exc:
-                tool_context = f"Workspace action rejected by policy: {exc}"
+                tool_context = f"Action rejected by policy: {exc}"
                 yield {
                     "event": "message",
                     "data": json.dumps({
                         "type": "tool.failed",
-                        "tool": workspace_call.name,
+                        "tool": action_call.name,
                         "requestId": exc.request_id,
                         "error": str(exc),
                     }),
                 }
             else:
-                approval_payload = approval or {
-                    "request_id": action_request.request_id,
-                    "tool": f"{action_request.tool}.{action_request.action}",
-                    "summary": action_request.preview,
-                    "arguments": action_request.arguments,
-                }
-                yield {
-                    "event": "message",
-                    "data": json.dumps({
-                        "type": "request.opened",
-                        "requestType": "permission",
-                        "requestId": action_request.request_id,
-                        "tool": approval_payload["tool"],
-                        "summary": approval_payload["summary"],
-                        "arguments": approval_payload["arguments"],
-                        "action": action_request.model_dump(),
-                    }),
-                }
+                if approval:
+                    yield {
+                        "event": "message",
+                        "data": json.dumps({
+                            "type": "request.opened",
+                            "requestType": "permission",
+                            "requestId": action_request.request_id,
+                            "tool": approval["tool"],
+                            "summary": approval["summary"],
+                            "arguments": approval["arguments"],
+                            "action": action_request.model_dump(),
+                        }),
+                    }
 
                 decision = await action_gateway.wait_for_decision(action_request)
                 action_name = f"{action_request.tool}.{action_request.action}"
@@ -144,9 +143,9 @@ async def stream_turn(thread_id: str, model: Optional[str] = Query("grok-4-5")):
                         }),
                     }
                     try:
-                        action_result = action_gateway.execute(action_request)
+                        action_result = await action_gateway.execute(action_request)
                     except ActionGatewayError as exc:
-                        tool_context = f"Workspace action could not execute ({action_name}): {exc}"
+                        tool_context = f"Action could not execute ({action_name}): {exc}"
                         yield {
                             "event": "message",
                             "data": json.dumps({
@@ -159,7 +158,7 @@ async def stream_turn(thread_id: str, model: Optional[str] = Query("grok-4-5")):
                     else:
                         if action_result.status == "completed":
                             result = action_result.result or {}
-                            tool_context = f"Workspace tool result ({action_name}): {json.dumps(result)}"
+                            tool_context = f"Action result ({action_name}): {json.dumps(result)}"
                             yield {
                                 "event": "message",
                                 "data": json.dumps({
@@ -171,7 +170,7 @@ async def stream_turn(thread_id: str, model: Optional[str] = Query("grok-4-5")):
                             }
                         else:
                             error = action_result.error or "The action failed."
-                            tool_context = f"Workspace action failed ({action_name}): {error}"
+                            tool_context = f"Action failed ({action_name}): {error}"
                             yield {
                                 "event": "message",
                                 "data": json.dumps({
@@ -182,7 +181,7 @@ async def stream_turn(thread_id: str, model: Optional[str] = Query("grok-4-5")):
                                 }),
                             }
                 elif decision == "deny":
-                    tool_context = f"Workspace tool denied by the user: {action_name}"
+                    tool_context = f"Action denied by the user: {action_name}"
                     yield {
                         "event": "message",
                         "data": json.dumps({
@@ -192,7 +191,7 @@ async def stream_turn(thread_id: str, model: Optional[str] = Query("grok-4-5")):
                         }),
                     }
                 else:
-                    tool_context = f"Workspace tool expired before approval: {action_name}"
+                    tool_context = f"Action expired before approval: {action_name}"
                     yield {
                         "event": "message",
                         "data": json.dumps({

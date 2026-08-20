@@ -167,7 +167,7 @@ export default function ChatWindow({ bot, models, messages, setMessages, onUpdat
                 ...prev.filter((approval) => approval.requestId !== event.requestId),
                 event,
               ]);
-            } else if (['tool.completed', 'tool.failed', 'tool.denied', 'tool.expired'].includes(event.type)) {
+            } else if (['tool.started', 'tool.completed', 'tool.failed', 'tool.denied', 'tool.expired'].includes(event.type)) {
               setToolEvents((prev) => [
                 ...prev.slice(-4),
                 { ...event, id: `${event.type}-${Date.now()}` },
@@ -407,4 +407,3 @@ export default function ChatWindow({ bot, models, messages, setMessages, onUpdat
     </div>
   );
 }
-
