@@ -21,6 +21,7 @@ This is an independent open-source project and is not affiliated with xAI.
 - **Settings drawer:** Configure the MUAPI key, provider base URL, default model, Composio key, and local profile details.
 - **Connector surface:** Browse a curated or live Composio app catalog, inspect connection status, and start OAuth authorization explicitly from Marketplace.
 - **Read-only GitHub action:** After connecting GitHub, run an explicit issue lookup from chat and pass its structured result through the action gateway.
+- **Approval-gated GitHub write:** Propose a GitHub issue from chat, inspect the repository/title/body-size preview, approve it, and receive a normalized issue result.
 - **Audit trail:** Review local approval, workspace-tool, and connector events from the sidebar.
 - **Computer workspace surface:** Preview the intended computer/terminal experience while the runtime integration is still being built.
 
@@ -167,13 +168,15 @@ file content on the next line
 
 Paths must remain inside `WORKSPACE_ROOT`. Reads and writes are limited by `WORKSPACE_MAX_FILE_BYTES`, and every request/decision/result is recorded in the local audit store.
 
-The first connector action is intentionally explicit and read-only:
+Connector actions are intentionally explicit:
 
 ```text
 /connector github issues <owner>/<repo> [open|closed|all]
+/connector github create-issue <owner>/<repo> <title>
+optional body on the next line
 ```
 
-It requires a configured Composio key and an active GitHub connection. Results are limited to issue summaries; credentials and issue bodies are not copied into the action result or audit summary.
+The read action requires a configured Composio key and an active GitHub connection. The write action also requires an approval response. Results are limited to issue summaries; credentials and issue bodies are not copied into the action request preview or audit summary.
 
 ## API
 
@@ -224,7 +227,7 @@ The following surfaces are present but should not be mistaken for completed infr
 - **No durable memory or routines:** Conversations persist, but there is no separate memory store, scheduled routine engine, or background worker yet.
 - **No voice or multi-client apps:** Voice, desktop, and mobile clients are not included in this repository.
 - **Workspace tools are intentionally narrow:** The first tool loop supports confined file listing, reads, and writes only. Arbitrary shell commands, browser control, and background agents are not implemented.
-- **Connector actions are intentionally narrow:** Chat currently exposes only the explicit read-only GitHub issue lookup. Dynamic tool discovery, arbitrary connector calls, and connector writes remain roadmap work.
+- **Connector actions are intentionally narrow:** Chat currently exposes only GitHub issue listing and approval-gated issue creation. Dynamic tool discovery, arbitrary connector calls, and other connector writes remain roadmap work.
 - **Provider streaming is adapter-level:** Depending on the provider response, the service may receive a completed result and emit it to the UI in small deltas.
 - **No CI workflow is included yet:** Focused workspace and approval tests are present, but broader API, provider, and browser tests remain to be added.
 

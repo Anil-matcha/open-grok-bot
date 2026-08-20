@@ -87,6 +87,7 @@ class ActionInvocation:
     arguments: Dict[str, Any]
     target: Dict[str, Any]
     preview: str
+    display_arguments: Optional[Dict[str, Any]] = None
 
     @property
     def summary(self) -> str:
@@ -94,7 +95,7 @@ class ActionInvocation:
 
     @property
     def arguments_for_display(self) -> Dict[str, Any]:
-        return self.arguments
+        return self.display_arguments if self.display_arguments is not None else self.arguments
 
 
 class ActionPolicyError(ValueError):
@@ -272,7 +273,7 @@ class ActionGateway:
             action=definition.action,
             intent=definition.intent,
             target=redact_sensitive(invocation.target),
-            arguments=redact_sensitive(invocation.arguments),
+            arguments=redact_sensitive(invocation.arguments_for_display),
             preview=redact_sensitive(invocation.preview),
             risk=definition.risk,
             requires_approval=definition.requires_approval,

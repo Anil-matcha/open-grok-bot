@@ -12,6 +12,7 @@ from app.services.storage_service import StorageService, storage_service
 
 CONNECT_URL = "https://connect.composio.dev/mcp"
 GITHUB_LIST_ISSUES_TOOL = "GITHUB_LIST_REPOSITORY_ISSUES"
+GITHUB_CREATE_ISSUE_TOOL = "GITHUB_CREATE_AN_ISSUE"
 _SAFE_GITHUB_PART = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 
 
@@ -166,6 +167,52 @@ class ComposioService:
             "state": state,
             "count": len(issues),
             "issues": issues,
+        }
+
+    async def create_github_issue(
+        self,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str = "",
+    ) -> Dict[str, Any]:
+        owner = self._validate_github_part(owner, "owner")
+        repo = self._validate_github_part(repo, "repository")
+        if not isinstance(title, str) or not title.strip() or len(title.strip()) > 256:
+            raise ConnectorServiceError("Issue title must be between 1 and 256 characters.")
+        if not isinstance(body, str) or len(body) > 10000:
+            raise ConnectorServiceError("Issue body must be at most 10000 characters.")
+
+        response = await self.call_tool(
+            GITHUB_CREATE_ISSUE_TOOL,
+            {
+                "owner": owner,
+                "repo": repo,
+                "title": title.strip(),
+                "body": body,
+            },
+        )
+        payload = response.get("data", response)
+        if isinstance(payload, dict) and payload.get("successful") is False:
+            raise ConnectorServiceError(payload.get("error") or "GitHub issue creation failed.")
+        if isinstance(payload, dict) and "data" in payload:
+            payload = payload["data"]
+        if isinstance(payload, list):
+            payload = payload[0] if payload else {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        return {
+            "connector": "github",
+            "operation": "create_issue",
+            "repository": f"{owner}/{repo}",
+            "created": True,
+            "issue": {
+                "number": payload.get("number"),
+                "title": payload.get("title") or title.strip(),
+                "state": payload.get("state") or "open",
+                "url": payload.get("html_url") or payload.get("url"),
+            },
         }
 
 

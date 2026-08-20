@@ -6,7 +6,6 @@ import uuid
 
 from app.config import settings
 from app.services.storage_service import storage_service
-from app.services.workspace_service import WorkspaceToolCall
 
 
 def _now() -> str:
@@ -29,7 +28,7 @@ class ApprovalBroker:
         self,
         thread_id: str,
         bot_id: str,
-        call: WorkspaceToolCall,
+        call: Any,
         request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         request_id = request_id or f"req-{uuid.uuid4().hex[:10]}"
