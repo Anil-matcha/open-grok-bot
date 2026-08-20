@@ -19,6 +19,7 @@ export default function SettingsModal({ isOpen, onClose }) {
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('https://api.muapi.ai/api/v1');
   const [defaultModel, setDefaultModel] = useState('grok-4-5');
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
@@ -28,6 +29,7 @@ export default function SettingsModal({ isOpen, onClose }) {
         .then((data) => {
           if (data) {
             setApiKey(data.muapi_api_key || '');
+            setApiKeyConfigured(Boolean(data.muapi_api_key_configured));
             setBaseUrl(data.muapi_base_url || 'https://api.muapi.ai/api/v1');
             setDefaultModel(data.default_model || 'grok-4-5');
           }
@@ -41,12 +43,14 @@ export default function SettingsModal({ isOpen, onClose }) {
   const handleSave = async (e) => {
     e.preventDefault();
     try {
-      await saveSettings({
+      const saved = await saveSettings({
         muapi_api_key: apiKey,
         muapi_base_url: baseUrl,
         default_model: defaultModel,
         theme: 'dark'
       });
+      setApiKey('');
+      setApiKeyConfigured(Boolean(saved?.muapi_api_key_configured));
       setSavedSuccess(true);
       setTimeout(() => {
         setSavedSuccess(false);
@@ -93,7 +97,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="............................................................"
+                placeholder={apiKeyConfigured ? 'Stored securely — enter to replace' : 'Paste MUAPI API Key...'}
                 className="w-full rounded-full bg-[#1c202d] border border-[#2a3045] px-4 py-2 pr-10 text-xs text-zinc-100 placeholder-zinc-500 font-mono focus:outline-none focus:border-blue-500 transition"
               />
               <button
@@ -106,7 +110,7 @@ export default function SettingsModal({ isOpen, onClose }) {
               </button>
             </div>
             <p className="text-[10px] text-zinc-500 font-mono">
-              Keys are stored locally in <span className="text-zinc-400">~/.open-grok-bot/settings.json</span>.
+              Keys are never returned. Leave blank to keep the stored key.
             </p>
           </div>
 

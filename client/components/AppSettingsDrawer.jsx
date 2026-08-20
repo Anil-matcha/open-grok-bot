@@ -21,6 +21,8 @@ export default function AppSettingsDrawer({
     "https://api.muapi.ai/api/v1",
   );
   const [composioApiKey, setComposioApiKey] = useState("");
+  const [muapiConfigured, setMuapiConfigured] = useState(false);
+  const [composioConfigured, setComposioConfigured] = useState(false);
   const [defaultModel, setDefaultModel] = useState("grok-4-5");
   const [showApiKey, setShowApiKey] = useState(false);
   const [showComposioKey, setShowComposioKey] = useState(false);
@@ -44,10 +46,12 @@ export default function AppSettingsDrawer({
         .then((data) => {
           if (data) {
             setMuapiApiKey(data.muapi_api_key || "");
+            setMuapiConfigured(Boolean(data.muapi_api_key_configured));
             setMuapiBaseUrl(
               data.muapi_base_url || "https://api.muapi.ai/api/v1",
             );
             setComposioApiKey(data.composio_api_key || "");
+            setComposioConfigured(Boolean(data.composio_api_key_configured));
             setDefaultModel(data.default_model || "grok-4-5");
           }
         })
@@ -89,13 +93,17 @@ export default function AppSettingsDrawer({
 
   const handleSaveMuapiSettings = async (field = "muapi") => {
     try {
-      await saveSettings({
+      const saved = await saveSettings({
         muapi_api_key: muapiApiKey,
         muapi_base_url: muapiBaseUrl,
         composio_api_key: composioApiKey,
         default_model: defaultModel,
         theme: "dark",
       });
+      setMuapiApiKey("");
+      setComposioApiKey("");
+      setMuapiConfigured(Boolean(saved?.muapi_api_key_configured));
+      setComposioConfigured(Boolean(saved?.composio_api_key_configured));
       if (onUpdateDefaultModel && typeof onUpdateDefaultModel === "function") {
         onUpdateDefaultModel(defaultModel);
       }
@@ -166,7 +174,7 @@ export default function AppSettingsDrawer({
           <div>
             <h3 className="text-sm font-bold text-zinc-100">Connections</h3>
             <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-              Shared by all bots. Keys are stored locally and masked by default.
+              Shared by all bots. Keys are write-only and encrypted locally. Leave a key blank to keep it.
             </p>
           </div>
 
@@ -182,7 +190,11 @@ export default function AppSettingsDrawer({
                   type={showApiKey ? "text" : "password"}
                   value={muapiApiKey}
                   onChange={(e) => setMuapiApiKey(e.target.value)}
-                  placeholder="Paste MUAPI API Key..."
+                  placeholder={
+                    muapiConfigured
+                      ? "Stored securely — enter to replace"
+                      : "Paste MUAPI API Key..."
+                  }
                   className="w-full bg-[#222226] border border-[#2e2e34] rounded-xl pl-3.5 pr-8 py-2.5 text-xs text-zinc-200 font-mono placeholder-zinc-500 focus:outline-none focus:border-zinc-400 transition"
                 />
                 <button
@@ -224,7 +236,11 @@ export default function AppSettingsDrawer({
                   type={showComposioKey ? "text" : "password"}
                   value={composioApiKey}
                   onChange={(e) => setComposioApiKey(e.target.value)}
-                  placeholder="Optional connector key..."
+                  placeholder={
+                    composioConfigured
+                      ? "Stored securely — enter to replace"
+                      : "Optional connector key..."
+                  }
                   className="w-full bg-[#222226] border border-[#2e2e34] rounded-xl pl-3.5 pr-8 py-2.5 text-xs text-zinc-200 font-mono placeholder-zinc-500 focus:outline-none focus:border-zinc-400 transition"
                 />
                 <button
@@ -254,7 +270,7 @@ export default function AppSettingsDrawer({
               </button>
             </div>
             <p className="text-[10px] leading-relaxed text-zinc-500">
-              Enables live connector catalog and OAuth links in Marketplace. Leave blank to use the curated catalog only.
+              Enables live connector catalog and OAuth links in Marketplace. Leave blank to keep the stored key.
             </p>
           </div>
 

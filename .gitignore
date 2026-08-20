@@ -25,6 +25,10 @@ server/app/services/__pycache__/
 .env*.local
 *.log
 .open-grok-bot/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+.encryption.key
 
 # OS & Editor files
 .DS_Store

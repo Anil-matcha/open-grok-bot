@@ -91,7 +91,8 @@ The server reads these variables from the environment:
 | `MUAPI_BASE_URL` | `https://api.muapi.ai/api/v1` | Provider API base URL |
 | `COMPOSIO_API_KEY` | empty | Optional connector credential used when no key is saved in local settings |
 | `DEFAULT_MODEL` | `grok-4-5` | Initial model used for new settings and bots |
-| `DATA_DIR` | per-user hidden app directory | JSON persistence location |
+| `DATA_DIR` | per-user hidden app directory | SQLite database, migration copies, and local key location |
+| `APP_ENCRYPTION_KEY` | generated mode-0600 key in `DATA_DIR` | Optional Fernet key for encrypted provider credentials |
 | `WORKSPACE_ROOT` | repository root | Maximum directory that approved workspace tools can access |
 | `WORKSPACE_MAX_FILE_BYTES` | `131072` | Read/write size limit for workspace files |
 | `APPROVAL_TIMEOUT_SECONDS` | `120` | How long a pending approval remains open |
@@ -117,8 +118,8 @@ Next.js client  ── HTTP + SSE ──▶  FastAPI server
                                      │
                  ┌───────────────────┼───────────────────┐
                  ▼                   ▼                   ▼
-           Local JSON files       MUAPI API       Optional Composio
-           bots/messages/settings model + upload  connector endpoints
+           SQLite + key store     MUAPI API       Optional Composio
+           state/settings/audit   model + upload  connector endpoints
 ```
 
 The main code areas are:
@@ -131,7 +132,9 @@ The main code areas are:
 | `server/app/main.py` | FastAPI app, CORS, router registration, and health route |
 | `server/app/routers/` | Bots, chat, models, uploads, settings, approvals, and connectors |
 | `server/app/services/muapi_service.py` | Provider requests, prediction polling, output parsing, and response events |
-| `server/app/services/storage_service.py` | Local JSON persistence and default data |
+| `server/app/services/storage_service.py` | SQLite persistence, legacy import, secrets, and default data |
+| `server/app/services/database.py` | SQLite connection management and schema migrations |
+| `server/app/services/secret_store.py` | Fernet encryption for provider credentials |
 | `server/app/services/workspace_service.py` | Confined list/read/write workspace tools |
 | `server/app/services/approval_broker.py` | Pending approval coordination and audit events |
 | `server/app/services/action_gateway.py` | Registered action policy, approval handoff, execution, and lifecycle audit |
@@ -192,7 +195,7 @@ All routes are prefixed with `/api/v1`.
 | POST | `/chat/send` | Store a user message |
 | GET | `/chat/stream/{thread_id}?model=...` | Stream a response over SSE |
 | POST | `/upload` | Validate and upload an image attachment |
-| GET, POST | `/settings` | Read or save local app settings |
+| GET, POST | `/settings` | Read public settings or save write-only credentials and app settings |
 | POST | `/approvals/respond` | Submit an Allow/Deny approval response |
 | GET | `/audit?limit=100` | Read recent approval, tool, and connector events |
 | GET | `/connectors/catalog` | Return curated or Composio-backed connector cards |
@@ -208,21 +211,23 @@ curl http://127.0.0.1:8000/api/v1/health
 
 ## Local data and secrets
 
-On first start, the server creates JSON files for bots, messages, settings, approvals, and audit events under the per-user data directory defined in `server/app/config.py`. This means conversations and the local tool trail persist across restarts without a database.
+On first start, the server creates a SQLite database under the per-user data directory defined in `server/app/config.py`. Bots, messages, settings, approvals, and audit events survive restarts, with schema migrations tracked in the database. Existing JSON files are imported once and retained as migration copies; credential fields in the old settings file are scrubbed after import.
 
 For local development:
 
-- Treat the settings file as sensitive because the saved provider key is stored locally.
+- Provider credentials are encrypted at rest with a mode-0600 Fernet key in `DATA_DIR`. Set `APP_ENCRYPTION_KEY` when the key must be supplied by deployment secrets or shared across restarts and hosts.
+- Settings responses never return provider credentials. Enter a new value to replace a stored key, or leave it blank to keep the current one.
+- Back up the SQLite database and encryption key together. If the key is lost, encrypted credentials must be entered again.
 - Keep the API bound to loopback unless you add authentication and tighten CORS.
 - Never commit API keys, local settings, transcripts, or generated environment files.
-- The repository ignores common `.env`, virtual-environment, cache, and build-output paths.
+- The repository ignores local SQLite files, encryption keys, `.env` files, virtual environments, caches, and build output.
 
 ## Limitations
 
 The following surfaces are present but should not be mistaken for completed infrastructure:
 
 - **No authentication or authorization:** The API is intended for one local user.
-- **No database:** JSON persistence is simple and convenient, but it is not suitable for concurrent or multi-user workloads.
+- **Single-user local storage:** SQLite improves restart durability, but authentication, ownership, backups, and multi-instance coordination are still pending.
 - **No real computer runtime:** The Computer tab is a visual preview; this repository does not provision a browser desktop or provide a working VNC session.
 - **No durable memory or routines:** Conversations persist, but there is no separate memory store, scheduled routine engine, or background worker yet.
 - **No voice or multi-client apps:** Voice, desktop, and mobile clients are not included in this repository.
@@ -246,7 +251,7 @@ npm run lint      # Run the configured Next.js lint command
 Run the focused backend tests with:
 
 ```bash
-DATA_DIR=/tmp/open-grok-bot-test-data PYTHONPATH=server python3 -m unittest discover -s server/tests -v
+DATA_DIR=/tmp/open-grok-bot-test-data PYTHONPATH=server python -m unittest discover -s server/tests -v
 ```
 
 When changing an API contract, update the Pydantic schema, router, client helper, tests, and this README together.

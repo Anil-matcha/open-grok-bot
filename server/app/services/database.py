@@ -1,0 +1,134 @@
+"""SQLite connection and migration helpers for local durable state."""
+
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import os
+from pathlib import Path
+import sqlite3
+from typing import Iterator, Optional
+
+
+SCHEMA_MIGRATIONS = {
+    1: """
+        CREATE TABLE IF NOT EXISTS bots (
+            id TEXT PRIMARY KEY,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            payload TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            is_secret INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS approvals (
+            request_id TEXT PRIMARY KEY,
+            thread_id TEXT,
+            payload TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_approvals_thread ON approvals(thread_id);
+        CREATE TABLE IF NOT EXISTS audit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            payload TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_events(created_at);
+        CREATE TABLE IF NOT EXISTS threads (
+            id TEXT PRIMARY KEY,
+            bot_id TEXT,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT,
+            status TEXT NOT NULL,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS connections (
+            id TEXT PRIMARY KEY,
+            connector TEXT NOT NULL,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS memories (
+            id TEXT PRIMARY KEY,
+            bot_id TEXT,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS storage_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    """,
+}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class Database:
+    """Small SQLite wrapper with WAL mode and explicit schema versions."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._migrate()
+        os.chmod(self.path, 0o600)
+
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        connection = sqlite3.connect(str(self.path), timeout=30)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 30000")
+        connection.execute("PRAGMA journal_mode = WAL")
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _migrate(self) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT NOT NULL
+                )
+                """
+            )
+            applied = {
+                row[0]
+                for row in connection.execute("SELECT version FROM schema_migrations")
+            }
+            for version, sql in sorted(SCHEMA_MIGRATIONS.items()):
+                if version in applied:
+                    continue
+                connection.executescript(sql)
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                    (version, _now()),
+                )
+
+    def get_meta(self, key: str) -> Optional[str]:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM storage_meta WHERE key = ?", (key,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO storage_meta(key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
